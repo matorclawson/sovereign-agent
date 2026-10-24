@@ -35,5 +35,6 @@ verify: lint test
 	$(UV) run --python 3.12 python scripts/verify_source_budget_v2.py
 	$(UV) run --python 3.12 sovereign-agent --help >/dev/null
 	$(UV) run --python 3.12 sovereign-agent doctor
-	$(UV) run --python 3.12 sovereign-agent demo store --mode simulated --root /tmp/sovereign-agent-demo
+	@demo_root=$$(mktemp -d "$${TMPDIR:-/tmp}/sovereign-agent-demo.XXXXXXXX"); \
+	$(UV) run --python 3.12 sovereign-agent demo store --mode simulated --root "$$demo_root"
 	$(UV) run --python 3.12 python scripts/verify_readme_onboarding_v3.py
