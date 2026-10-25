@@ -36,8 +36,15 @@ class SubscriptionModel:
         started = time.monotonic()
         if tools or any(os.environ.get(k) for k in ClaudeProvider.authentication_environment):
             raise ModelError("subscription route refuses tools and credential overrides")
+        env = allowed_environment("PATH", "HOME", "USER", "LOGNAME", "LANG", "LC_ALL", "TMPDIR")
+        env.update(
+            CLAUDE_CODE_MAX_TURNS="1",
+            CLAUDE_CODE_MAX_RETRIES="0",
+            CLAUDE_CODE_MAX_OUTPUT_TOKENS=str(max_output_tokens),
+            MAX_STRUCTURED_OUTPUT_RETRIES="0",
+        )
         provider = ClaudeProvider()
-        caps = provider.probe()
+        caps = provider.probe(env=env)
         flags = [
             "--model",
             "--safe-mode",
@@ -56,7 +63,7 @@ class SubscriptionModel:
             output=self.root / "provider-output",
             prompt=str(messages[-1]["content"]),
         )
-        spec = provider.build_invocation(request)
+        spec = provider.build_invocation(request, env=env)
         argv = spec.argv[:-1] + [
             "--model",
             MODEL,
@@ -75,13 +82,6 @@ class SubscriptionModel:
             str(messages[0]["content"]),
             spec.argv[-1],
         ]
-        env = allowed_environment("PATH", "HOME", "USER", "LOGNAME", "LANG", "LC_ALL", "TMPDIR")
-        env.update(
-            CLAUDE_CODE_MAX_TURNS="1",
-            CLAUDE_CODE_MAX_RETRIES="0",
-            CLAUDE_CODE_MAX_OUTPUT_TOKENS=str(max_output_tokens),
-            MAX_STRUCTURED_OUTPUT_RETRIES="0",
-        )
         self.last_receipt = {
             "requested_model": MODEL,
             "client": caps.version,

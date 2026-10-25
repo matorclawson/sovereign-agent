@@ -149,50 +149,61 @@ def test_objective_snapshots_are_immutable_and_beliefs_remain_revisable(tmp_path
     ]
 
 
-@pytest.mark.parametrize("observed", ["claude-fable-5-1", "different-model"])
-def test_installed_subscription_adapter_contract(tmp_path, monkeypatch, observed):
+@pytest.mark.parametrize(
+    ("observed", "missing"),
+    [
+        ("claude-fable-5-1", None),
+        ("different-model", None),
+        ("claude-fable-5-1", "--setting-sources"),
+    ],
+)
+def test_installed_subscription_adapter_contract(tmp_path, monkeypatch, observed, missing):
     from types import SimpleNamespace
 
     from sovereign_agent import research_model
-    from sovereign_agent.providers.base import InvocationSpec
     from sovereign_agent.providers.claude import ClaudeProvider
 
     flags = (
+        "-p --output-format stream-json --verbose "
         "--model --safe-mode --restricted --tools --strict-mcp-config --mcp-config "
         "--disable-slash-commands --no-session-persistence --setting-sources"
     )
-    monkeypatch.setattr(
-        ClaudeProvider,
-        "probe",
-        lambda _: SimpleNamespace(
-            available=True, version="fixture-only", evidence=(None, SimpleNamespace(text=flags))
-        ),
+    if missing:
+        flags = flags.replace(missing, "")
+    executable = tmp_path / "claude"
+    executable.write_text("#!/bin/sh\nexit 97\n")  # Never executed: only subprocess is mocked.
+    executable.chmod(0o700)
+    monkeypatch.setenv("PATH", str(tmp_path) + os.pathsep + os.environ["PATH"])
+    for name in ClaudeProvider.authentication_environment:
+        monkeypatch.delenv(name, raising=False)
+    for name in ("ANTHROPIC_BASE_URL", "CLAUDE_CONFIG_DIR", "HTTPS_PROXY", "UNRELATED_SECRET"):
+        monkeypatch.setenv(name, "synthetic-untrusted-override")
+    expected = {
+        k: os.environ[k]
+        for k in ("PATH", "HOME", "USER", "LOGNAME", "LANG", "LC_ALL", "TMPDIR")
+        if k in os.environ
+    }
+    expected.update(
+        CLAUDE_CODE_MAX_TURNS="1",
+        CLAUDE_CODE_MAX_RETRIES="0",
+        CLAUDE_CODE_MAX_OUTPUT_TOKENS="2000",
+        MAX_STRUCTURED_OUTPUT_RETRIES="0",
     )
-    monkeypatch.setattr(
-        ClaudeProvider,
-        "build_invocation",
-        lambda _, r: InvocationSpec(
-            argv=["claude", "-p", "--output-format", "stream-json", "--verbose", r.prompt],
-            cwd=r.workspace,
-        ),
-    )
+    children = []
 
     def run(argv, **kwargs):
+        children.append(argv[1:])
+        assert kwargs["env"] == expected
+        if argv[1:] in (["--version"], ["--help"]):
+            assert argv[0] == str(executable)
+            return SimpleNamespace(
+                returncode=0,
+                stderr="",
+                stdout=("fixture-only" if argv[1:] == ["--version"] else flags),
+            )
         assert "--max-budget-usd" not in argv and "--fallback-model" not in argv
         assert argv[argv.index("--tools") + 1] == ""
         assert argv[argv.index("--setting-sources") + 1] == ""
-        safe = {"PATH", "HOME", "USER", "LOGNAME", "LANG", "LC_ALL", "TMPDIR"}
-        budgets = {
-            "CLAUDE_CODE_MAX_TURNS",
-            "CLAUDE_CODE_MAX_RETRIES",
-            "CLAUDE_CODE_MAX_OUTPUT_TOKENS",
-            "MAX_STRUCTURED_OUTPUT_RETRIES",
-        }
-        assert set(kwargs["env"]) <= safe | budgets
-        assert kwargs["env"]["HOME"] == os.environ["HOME"]
-        assert kwargs["env"]["CLAUDE_CODE_MAX_TURNS"] == "1"
-        assert kwargs["env"]["CLAUDE_CODE_MAX_RETRIES"] == "0"
-        assert kwargs["env"]["CLAUDE_CODE_MAX_OUTPUT_TOKENS"] == "2000"
         lines = [
             {"type": "system", "model": observed},
             {
@@ -206,17 +217,20 @@ def test_installed_subscription_adapter_contract(tmp_path, monkeypatch, observed
         ]
         return SimpleNamespace(returncode=0, stderr="", stdout="\n".join(map(json.dumps, lines)))
 
-    for name in ("ANTHROPIC_BASE_URL", "CLAUDE_CONFIG_DIR", "HTTPS_PROXY", "UNRELATED_SECRET"):
-        monkeypatch.setenv(name, "synthetic-untrusted-override")
     monkeypatch.setattr(research_model.subprocess, "run", run)
     model = research_model.SubscriptionModel(tmp_path)
     messages = [{"role": "system", "content": "fixture"}, {"role": "user", "content": "fixture"}]
-    if observed == "different-model":
+    if observed == "different-model" or missing:
         with pytest.raises(ModelError):
             model.complete(messages, [], timeout=2, max_output_tokens=2000)
     else:
         assert model.complete(messages, [], timeout=2, max_output_tokens=2000).output_tokens == 12
         assert model.last_receipt["api_price_valuation_usd"] == 0.01
+    assert children[:2] == [["--version"], ["--help"]]
+    if missing:
+        assert len(children) == 2  # Refuse before re-probe or inference.
+    else:
+        assert len(children) == 5 and children[2:4] == children[:2]
 
 
 def test_subscription_adapter_refuses_api_key_override(tmp_path, monkeypatch):
@@ -225,3 +239,34 @@ def test_subscription_adapter_refuses_api_key_override(tmp_path, monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "synthetic-fixture-not-a-credential")
     with pytest.raises(ModelError, match="credential overrides"):
         SubscriptionModel(tmp_path).complete([], [], timeout=1, max_output_tokens=100)
+
+
+def test_claude_optional_probe_environment_keeps_other_callers_defaults(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from sovereign_agent.providers import base
+    from sovereign_agent.providers.claude import ClaudeProvider
+
+    executable = tmp_path / "claude"
+    executable.write_text("#!/bin/sh\nexit 97\n")
+    executable.chmod(0o700)
+    monkeypatch.setenv("PATH", str(tmp_path) + os.pathsep + os.environ["PATH"])
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "synthetic-existing-caller-credential")
+    children = []
+
+    def run(argv, **kwargs):
+        children.append(kwargs["env"])
+        return SimpleNamespace(
+            returncode=0,
+            stderr="",
+            stdout=(
+                "fixture" if argv[-1] == "--version" else "-p --output-format stream-json --verbose"
+            ),
+        )
+
+    monkeypatch.setattr(base.subprocess, "run", run)
+    spec = ClaudeProvider().build_invocation(
+        base.InvocationRequest(workspace=tmp_path, output=tmp_path / "output", prompt="fixture")
+    )
+    assert children == [None, None]  # Default probes keep inherited-environment semantics.
+    assert spec.env["ANTHROPIC_API_KEY"] == "synthetic-existing-caller-credential"

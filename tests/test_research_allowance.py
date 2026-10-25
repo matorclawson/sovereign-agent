@@ -226,3 +226,39 @@ def test_private_research_state_and_proposal_permissions(tmp_path):
     assert len(proposals) == 1
     assert proposals[0].stat().st_mode & 0o777 == 0o600
     assert research.head(db, identifier)["evaluations"] == 1
+
+
+@pytest.mark.parametrize("resource", ["actions", "evaluations"])
+def test_lifetime_action_evaluation_ceiling_survives_campaign_change(tmp_path, resource):
+    db = research.open_agent(tmp_path)
+    identifier = research.revise(db, "Retain lifetime accounting")
+    with db.immediate() as connection:
+        connection.execute(
+            f"UPDATE investigations SET {resource}=? WHERE id=?",
+            (allowance.CAPS[resource] - 1, identifier),
+        )
+        campaign = allowance.grant(db, identifier, "last-unit", 600, "operator")
+        allowance.charge(db, identifier, campaign, resource, 1)
+    if resource == "actions":
+        with pytest.raises(PermissionError, match="cumulative"):
+            with db.immediate():
+                allowance.grant(db, identifier, "later", 600, "operator")
+    else:
+        with db.immediate():
+            later = allowance.grant(db, identifier, "later", 600, "operator")
+        assert allowance.current(db, identifier)["evaluation_limit"] == 0
+        with pytest.raises(PermissionError, match="evaluations"):
+            with db.immediate():
+                allowance.charge(db, identifier, later, resource, 1)
+    assert research.head(db, identifier)[resource] == allowance.CAPS[resource]
+
+
+@pytest.mark.parametrize("seconds", [0, 601, True])
+def test_invalid_campaign_clock_does_not_replace_authority(tmp_path, seconds):
+    db = research.open_agent(tmp_path)
+    identifier = research.revise(db, "Do not renew on invalid input")
+    before = allowance.current(db, identifier)
+    with pytest.raises(ValueError, match="bounded campaign"):
+        with db.immediate():
+            allowance.grant(db, identifier, "invalid-clock", seconds, "operator")
+    assert allowance.current(db, identifier) == before

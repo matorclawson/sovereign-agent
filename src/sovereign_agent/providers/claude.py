@@ -27,11 +27,11 @@ class ClaudeProvider:
         "CLAUDE_CODE_OAUTH_TOKEN",
     )
 
-    def probe(self) -> ProviderCapabilities:
+    def probe(self, *, env: dict[str, str] | None = None) -> ProviderCapabilities:
         if look_up(self.executable) is None:
             return ProviderCapabilities(available=False)
-        version_probe = capture(self.executable, "--version")
-        help_probe = capture(self.executable, "--help")
+        version_probe = capture(self.executable, "--version", env=env)
+        help_probe = capture(self.executable, "--help", env=env)
         evidence = (version_probe, help_probe)
         failed = next((item for item in evidence if item.exit_code != 0), None)
         if failed is not None:
@@ -64,8 +64,10 @@ class ClaudeProvider:
             evidence=evidence,
         )
 
-    def build_invocation(self, request: InvocationRequest) -> InvocationSpec:
-        caps = self.probe()
+    def build_invocation(
+        self, request: InvocationRequest, *, env: dict[str, str] | None = None
+    ) -> InvocationSpec:
+        caps = self.probe(env=env)
         require_proven(
             caps,
             request,
@@ -103,7 +105,7 @@ class ClaudeProvider:
         return InvocationSpec(
             argv=argv,
             cwd=request.workspace,
-            env=allowed_environment(*self.authentication_environment),
+            env=allowed_environment(*self.authentication_environment) if env is None else dict(env),
         )
 
     def parse_event(self, line: str) -> ProviderEvent | None:
