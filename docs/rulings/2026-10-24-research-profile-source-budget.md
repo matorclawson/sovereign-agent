@@ -1,8 +1,14 @@
 # Measured research-profile source allowance
 
-Created: 2026-10-24. Status: PROPOSED for existing owner review.
+Created: 2026-10-24. Status: ACCEPTED for candidate 134d4a46.
 
 sow: sovereign-agent-SOW-01
+
+Architect accepted the exact installed ceiling and three documentation/policy
+paths on 24 October (`ans_ec11a945916c38a0`), confirmed by SOW-01 revision 8.
+This acceptance applies to candidate 134d4a46, not later source growth.
+The submission below is preserved as history; references to pending review
+describe its state before the acceptance above.
 
 The operator authorized the finite persistent research slice, deterministic
 milestone A and separately bounded model milestone B on 24 October. The same

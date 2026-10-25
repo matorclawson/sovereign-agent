@@ -45,7 +45,10 @@ def test_invalid_proposals_hold_without_scientific_effect(tmp_path, text):
     assert model.calls == 1
     assert research.head(db, identifier)["evaluations"] == 0
     assert research.head(db, identifier)["calls"] == 1
-    assert research.head(db, identifier)["tokens"] == 1000  # Lost output stays reserved.
+    assert research.head(db, identifier)["tokens"] == (2000 if isinstance(text, Exception) else 20)
+    usage = research.context(db, identifier)["allowances"]
+    assert usage["unknown"] == (2000 if isinstance(text, Exception) else 0)
+    assert usage["consumed"] == (0 if isinstance(text, Exception) else 20)
     assert research.wake(db, tmp_path, model) == "WAITING"
     assert model.calls == 1
 
@@ -55,7 +58,15 @@ def test_exhausted_budget_never_calls_model(tmp_path, budget, value):
     db = research.open_agent(tmp_path)
     identifier = research.revise(db, "Bounded question")
     with db.immediate() as connection:
-        connection.execute(f"UPDATE investigations SET {budget}=? WHERE id=?", (value, identifier))
+        if budget == "deadline":
+            connection.execute(
+                "UPDATE research_campaigns SET deadline=? WHERE investigation=?",
+                (value, identifier),
+            )
+        else:
+            connection.execute(
+                f"UPDATE investigations SET {budget}=? WHERE id=?", (value, identifier)
+            )
     model = Reply("never called")
     assert research.wake(db, tmp_path, model) == "HELD"
     assert model.calls == 0
@@ -129,7 +140,75 @@ def test_objective_snapshots_are_immutable_and_beliefs_remain_revisable(tmp_path
     with pytest.raises(sqlite3.IntegrityError, match="immutable"):
         with db.immediate() as connection:
             connection.execute("DELETE FROM research_revisions")
-    assert [e["question"] for e in research.history(db, identifier)] == [
+    assert [
+        e["question"] for e in research.history(db, identifier) if e["kind"] == "research.objective"
+    ] == [
         "Original question",
         "Revised question",
     ]
+
+
+@pytest.mark.parametrize("observed", ["claude-fable-5-1", "different-model"])
+def test_installed_subscription_adapter_contract(tmp_path, monkeypatch, observed):
+    from types import SimpleNamespace
+
+    from sovereign_agent import research_model
+    from sovereign_agent.providers.base import InvocationSpec
+    from sovereign_agent.providers.claude import ClaudeProvider
+
+    flags = (
+        "--model --safe-mode --restricted --tools --strict-mcp-config --mcp-config "
+        "--disable-slash-commands --no-session-persistence"
+    )
+    monkeypatch.setattr(
+        ClaudeProvider,
+        "probe",
+        lambda _: SimpleNamespace(
+            available=True, version="fixture-only", evidence=(None, SimpleNamespace(text=flags))
+        ),
+    )
+    monkeypatch.setattr(
+        ClaudeProvider,
+        "build_invocation",
+        lambda _, r: InvocationSpec(
+            argv=["claude", "-p", "--output-format", "stream-json", "--verbose", r.prompt],
+            cwd=r.workspace,
+        ),
+    )
+
+    def run(argv, **kwargs):
+        assert "--max-budget-usd" not in argv and "--fallback-model" not in argv
+        assert argv[argv.index("--tools") + 1] == ""
+        assert kwargs["env"]["CLAUDE_CODE_MAX_TURNS"] == "1"
+        assert kwargs["env"]["CLAUDE_CODE_MAX_RETRIES"] == "0"
+        assert kwargs["env"]["CLAUDE_CODE_MAX_OUTPUT_TOKENS"] == "2000"
+        lines = [
+            {"type": "system", "model": observed},
+            {
+                "type": "result",
+                "subtype": "success",
+                "num_turns": 1,
+                "result": "{}",
+                "usage": {"output_tokens": 12},
+                "total_cost_usd": 0.01,
+            },
+        ]
+        return SimpleNamespace(returncode=0, stderr="", stdout="\n".join(map(json.dumps, lines)))
+
+    monkeypatch.setattr(research_model.subprocess, "run", run)
+    model = research_model.SubscriptionModel(tmp_path)
+    messages = [{"role": "system", "content": "fixture"}, {"role": "user", "content": "fixture"}]
+    if observed == "different-model":
+        with pytest.raises(ModelError):
+            model.complete(messages, [], timeout=2, max_output_tokens=2000)
+    else:
+        assert model.complete(messages, [], timeout=2, max_output_tokens=2000).output_tokens == 12
+        assert model.last_receipt["api_price_valuation_usd"] == 0.01
+
+
+def test_subscription_adapter_refuses_api_key_override(tmp_path, monkeypatch):
+    from sovereign_agent.research_model import SubscriptionModel
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "synthetic-fixture-not-a-credential")
+    with pytest.raises(ModelError, match="credential overrides"):
+        SubscriptionModel(tmp_path).complete([], [], timeout=1, max_output_tokens=100)

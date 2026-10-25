@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import stat
 import subprocess
 import sys
 import time
@@ -75,10 +76,19 @@ def submit(root: Path, raw: str) -> None:
 def collect(root: Path, raw: str) -> tuple[Receipt, str] | None:
     request = Request.model_validate_json(raw)
     path = directory(root, request.operation) / "result.json"
-    if not path.exists():
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW)
+    except FileNotFoundError:
         return None
-    with path.open("rb") as stream:
-        content = stream.read(8193)
+    except OSError:
+        raise ValueError("receipt must be a regular file, not an alias") from None
+    try:
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISREG(metadata.st_mode) or metadata.st_size > 8192:
+            raise ValueError("receipt must be a bounded regular file")
+        content = os.read(descriptor, 8193)
+    finally:
+        os.close(descriptor)
     if len(content) > 8192:
         raise ValueError("oversized executor receipt")
     receipt = Receipt.model_validate_json(content)

@@ -19,6 +19,7 @@ from sovereign_agent.assistant_schema import SCHEMA_25 as MIGRATION_25
 from sovereign_agent.assistant_schema import SCHEMA_26 as MIGRATION_26
 from sovereign_agent.assistant_schema import SCHEMA_27 as MIGRATION_27
 from sovereign_agent.research_schema import SCHEMA as MIGRATION_28
+from sovereign_agent.research_schema import SCHEMA_29 as MIGRATION_29
 
 MIGRATION_1 = """
 PRAGMA foreign_keys = ON;
@@ -836,6 +837,7 @@ MIGRATIONS: tuple[tuple[int, str], ...] = (
     (26, MIGRATION_26),
     (27, MIGRATION_27),
     (28, MIGRATION_28),
+    (29, MIGRATION_29),
 )
 
 
