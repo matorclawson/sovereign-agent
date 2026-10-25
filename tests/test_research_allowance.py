@@ -180,3 +180,49 @@ def test_stale_inference_and_undispatched_intent_have_supported_recovery(tmp_pat
     assert "stale inference" in json.dumps(research.context(db, identifier)["recovery"])
     assert command(tmp_path, "work").returncode == 0
     assert db.connection.execute("SELECT inference_owner FROM research_profile").fetchone()[0] == ""
+
+
+@pytest.mark.parametrize("resource", ["actions", "evaluations"])
+def test_campaign_resource_exhaustion_rejects_without_reset(tmp_path, resource):
+    db = research.open_agent(tmp_path)
+    identifier = research.revise(db, "Keep measurements and accounting")
+    limits = dict(allowance.CAPS, **{resource: 1})
+    with db.immediate():
+        campaign = allowance.grant(db, identifier, "bounded", 600, "operator", limits)
+        allowance.charge(db, identifier, campaign, resource, 1)
+    with pytest.raises(PermissionError, match=resource):
+        with db.immediate():
+            allowance.charge(db, identifier, campaign, resource, 1)
+    assert research.head(db, identifier)[resource] == 1
+    with db.immediate():
+        allowance.grant(db, identifier, "later", 600, "operator", limits)
+    assert research.head(db, identifier)[resource] == 1
+
+
+@pytest.mark.parametrize(
+    "change", [{"calls": 13}, {"tokens": 0}, {"actions": -1}, {"evaluations": 13}, {"calls": True}]
+)
+def test_invalid_campaign_limits_preserve_current_authority(tmp_path, change):
+    db = research.open_agent(tmp_path)
+    identifier = research.revise(db, "Bounded objective")
+    original = allowance.current(db, identifier)
+    with pytest.raises(ValueError, match="bounded campaign"):
+        with db.immediate():
+            allowance.grant(
+                db, identifier, "invalid", 600, "operator", dict(allowance.CAPS, **change)
+            )
+    assert allowance.current(db, identifier) == original
+
+
+def test_private_research_state_and_proposal_permissions(tmp_path):
+    tmp_path.chmod(0o755)
+    db = research.open_agent(tmp_path)
+    identifier = research.revise(db, "Private fixture")
+    assert research.wake(db, tmp_path, FixtureModel()) == "PROPOSED"
+    wait_for(lambda: research.reconcile(db, tmp_path) == 1)
+    assert tmp_path.stat().st_mode & 0o777 == 0o700
+    assert db.path.stat().st_mode & 0o777 == 0o600
+    proposals = list(tmp_path.glob(".sovereign/runs/*/proposal.json"))
+    assert len(proposals) == 1
+    assert proposals[0].stat().st_mode & 0o777 == 0o600
+    assert research.head(db, identifier)["evaluations"] == 1

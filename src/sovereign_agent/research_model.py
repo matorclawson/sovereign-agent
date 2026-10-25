@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from sovereign_agent.model_turn import Message, ModelError, ModelTurn
-from sovereign_agent.providers.base import InvocationRequest, has_flag
+from sovereign_agent.providers.base import InvocationRequest, allowed_environment, has_flag
 from sovereign_agent.providers.claude import ClaudeProvider
 
 MODEL = "claude-fable-5-1"
@@ -47,6 +47,7 @@ class SubscriptionModel:
             "--mcp-config",
             "--disable-slash-commands",
             "--no-session-persistence",
+            "--setting-sources",
         ]
         if not caps.available or not all(has_flag(caps.evidence[1].text, flag) for flag in flags):
             raise ModelError("installed provider cannot prove required restricted print flags")
@@ -68,11 +69,13 @@ class SubscriptionModel:
             '{"mcpServers":{}}',
             "--disable-slash-commands",
             "--no-session-persistence",
+            "--setting-sources",
+            "",
             "--system-prompt",
             str(messages[0]["content"]),
             spec.argv[-1],
         ]
-        env = dict(os.environ)
+        env = allowed_environment("PATH", "HOME", "USER", "LOGNAME", "LANG", "LC_ALL", "TMPDIR")
         env.update(
             CLAUDE_CODE_MAX_TURNS="1",
             CLAUDE_CODE_MAX_RETRIES="0",

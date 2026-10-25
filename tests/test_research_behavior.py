@@ -1,6 +1,7 @@
 """Proposal/budget controls, not evidence of model-driven scientific competence."""
 
 import json
+import os
 import time
 
 import pytest
@@ -158,7 +159,7 @@ def test_installed_subscription_adapter_contract(tmp_path, monkeypatch, observed
 
     flags = (
         "--model --safe-mode --restricted --tools --strict-mcp-config --mcp-config "
-        "--disable-slash-commands --no-session-persistence"
+        "--disable-slash-commands --no-session-persistence --setting-sources"
     )
     monkeypatch.setattr(
         ClaudeProvider,
@@ -179,6 +180,16 @@ def test_installed_subscription_adapter_contract(tmp_path, monkeypatch, observed
     def run(argv, **kwargs):
         assert "--max-budget-usd" not in argv and "--fallback-model" not in argv
         assert argv[argv.index("--tools") + 1] == ""
+        assert argv[argv.index("--setting-sources") + 1] == ""
+        safe = {"PATH", "HOME", "USER", "LOGNAME", "LANG", "LC_ALL", "TMPDIR"}
+        budgets = {
+            "CLAUDE_CODE_MAX_TURNS",
+            "CLAUDE_CODE_MAX_RETRIES",
+            "CLAUDE_CODE_MAX_OUTPUT_TOKENS",
+            "MAX_STRUCTURED_OUTPUT_RETRIES",
+        }
+        assert set(kwargs["env"]) <= safe | budgets
+        assert kwargs["env"]["HOME"] == os.environ["HOME"]
         assert kwargs["env"]["CLAUDE_CODE_MAX_TURNS"] == "1"
         assert kwargs["env"]["CLAUDE_CODE_MAX_RETRIES"] == "0"
         assert kwargs["env"]["CLAUDE_CODE_MAX_OUTPUT_TOKENS"] == "2000"
@@ -195,6 +206,8 @@ def test_installed_subscription_adapter_contract(tmp_path, monkeypatch, observed
         ]
         return SimpleNamespace(returncode=0, stderr="", stdout="\n".join(map(json.dumps, lines)))
 
+    for name in ("ANTHROPIC_BASE_URL", "CLAUDE_CONFIG_DIR", "HTTPS_PROXY", "UNRELATED_SECRET"):
+        monkeypatch.setenv(name, "synthetic-untrusted-override")
     monkeypatch.setattr(research_model.subprocess, "run", run)
     model = research_model.SubscriptionModel(tmp_path)
     messages = [{"role": "system", "content": "fixture"}, {"role": "user", "content": "fixture"}]

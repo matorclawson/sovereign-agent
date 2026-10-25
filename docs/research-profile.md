@@ -92,6 +92,12 @@ refused. A CLI API-price valuation is recorded separately from billing; it is
 not proof of an invoice or an enforceable dollar ceiling. Other operators must
 establish their own authorized access contract. No provider installation,
 credential copying or account/billing reconfiguration is performed here.
+The child inherits only PATH, unchanged native HOME/USER/LOGNAME, LANG/LC_ALL
+and TMPDIR, plus fixed turn/output controls. Endpoint, config-directory, proxy
+and unrelated secret overrides are excluded. Empty `--setting-sources` disables
+user/project/local settings; safe/restricted mode disables custom hooks and
+skills. Installed administrative policy still applies. Research roots are 0700;
+the database and proposal artifacts are 0600.
 
 Operation intent precedes submission. Executor files under `.sovereign/executor/`
 represent external work; the database alone grants authority. Stable operation

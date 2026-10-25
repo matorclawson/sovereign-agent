@@ -74,7 +74,9 @@ def check_root(root: Path, profile: str) -> None:
 def open_agent(root: Path) -> Database:
     check_root(root, "research")
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    root.chmod(0o700)
     db = Database(safe_join(root, "agent.sqlite"))
+    db.path.chmod(0o600)
     with db.immediate() as connection:
         connection.execute("INSERT OR IGNORE INTO research_profile(id) VALUES (1)")
     return db
@@ -509,6 +511,7 @@ def apply(db: Database, root: Path, claim: queue.Claim, proposal: Proposal) -> N
             workspace = safe_join(root, ".sovereign/runs/" + claim.id)
             workspace.mkdir(parents=True, exist_ok=True, mode=0o700)
             (workspace / "proposal.json").write_text(proposal.model_dump_json())
+            (workspace / "proposal.json").chmod(0o600)
         elif proposal.x is not None:
             raise ValueError("only evaluate may specify a point")
         state = {"stop": "STOPPED", "escalate": "ESCALATED"}.get(proposal.action, "ACTIVE")
