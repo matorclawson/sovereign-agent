@@ -11,6 +11,38 @@ import pytest
 from sovereign_agent import research_executor as executor
 
 
+def test_owned_worker_excludes_parent_secrets_and_still_returns_measurement(tmp_path, monkeypatch):
+    expected = {
+        k: os.environ[k]
+        for k in ("PATH", "HOME", "USER", "LOGNAME", "LANG", "LC_ALL", "TMPDIR")
+        if k in os.environ
+    }
+    for name in (
+        "ANTHROPIC_API_KEY",
+        "ANTHROPIC_BASE_URL",
+        "CLAUDE_CONFIG_DIR",
+        "HTTPS_PROXY",
+        "UNRELATED_SECRET",
+        "PYTHONPATH",
+    ):
+        monkeypatch.setenv(name, "synthetic-untrusted-parent")
+    original = subprocess.Popen
+    children = []
+
+    def launch(*args, **kwargs):
+        assert kwargs["env"] == expected
+        child = original(*args, **kwargs)
+        children.append(child)
+        return child
+
+    monkeypatch.setattr(executor.subprocess, "Popen", launch)
+    request = executor.Request(operation="c" * 32, x=0.0, delay=0.0)
+    executor.submit(tmp_path, request.model_dump_json())
+    assert len(children) == 1 and children[0].wait(timeout=5) == 0
+    receipt, _ = executor.collect(tmp_path, request.model_dump_json())
+    assert receipt.status == "COMPLETED" and receipt.value == 0.190625
+
+
 @pytest.mark.parametrize("kind", ["fifo", "symlink", "directory", "oversize"])
 def test_receipt_refusal_is_bounded_before_read(tmp_path, kind):
     request = executor.Request(operation="a" * 32, x=0.0, delay=0.0)
