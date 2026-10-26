@@ -1,7 +1,10 @@
 """Count the entire installed teaching distribution, with a visible core subtotal.
 
 Supersedes verify_source_budget.py for the always-on curriculum. Allowance:
-docs/rulings/2026-09-07-always-on-source-budget.md. Legacy script remains history.
+docs/rulings/2026-09-07-always-on-source-budget.md, with the measured research
+amendments in docs/rulings/2026-10-24-research-profile-source-budget.md and
+docs/rulings/2026-10-25-research-continuation-source-budget.md.
+Legacy script remains history.
 """
 
 from __future__ import annotations
@@ -14,9 +17,9 @@ from verify_source_budget import MAX_ROOT_EXPORTS, root_exports
 ROOT = Path(__file__).resolve().parent.parent
 CORE = ROOT / "src" / "sovereign_agent"
 MAX_CORE_MODULES = 55
-MAX_CORE_LINES = 11_000
+MAX_CORE_LINES = 11_500
 MAX_INSTALLED_MODULES = 80
-MAX_INSTALLED_LINES = 14_000
+MAX_INSTALLED_LINES = 14_750
 
 
 def measure(root: Path) -> tuple[int, int]:

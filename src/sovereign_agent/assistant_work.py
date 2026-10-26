@@ -56,7 +56,7 @@ def _enqueue(
         or not math.isfinite(now)
         or not isinstance(subject, str)
         or len(subject) > 100
-        or role not in {"shop", "research"}
+        or role not in {"shop", "research", "investigation"}
         or len(billing_session) > 200
     ):
         raise ValueError("nonempty bounded intake required")

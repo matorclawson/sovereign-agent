@@ -21,6 +21,14 @@ from sovereign_agent.telegram_channel import Telegram, deliver_one, poll
 
 
 def handle(args: argparse.Namespace) -> int:
+    from sovereign_agent import research as investigations
+
+    root = Path(args.root).resolve()
+    investigations.check_root(root, args.profile)
+    if args.profile == "research":
+        return handle_research(args, root)
+    if args.action in {"pause", "resume", "redirect", "allow", "release-inference", "recover"}:
+        raise ValueError("action requires the research profile")
     from reference_organizations.store.account_recovery import configured_supplier
     from reference_organizations.store.agent import OfflineShopModel, seed_lucy
     from reference_organizations.store.assistant import reconcile_once, run_once
@@ -376,6 +384,102 @@ def handle(args: argparse.Namespace) -> int:
     return 1 if isinstance(result, dict) and result.get("passed") is False else 0
 
 
+def handle_research(args: argparse.Namespace, root: Path) -> int:
+    from sovereign_agent import research
+
+    db = research.open_agent(root)
+    result: Any = {"status": "INITIALIZED", "database": str(db.path)}
+    if args.action in {"ask", "redirect"}:
+        if args.action == "redirect" and not args.id:
+            raise ValueError("redirect requires --id")
+        result = {"investigation": research.revise(db, args.value, args.id)}
+    elif args.action == "allow":
+        from sovereign_agent import research_allowance as allowance
+
+        with db.immediate():
+            result = {
+                "campaign": allowance.grant(
+                    db,
+                    args.id,
+                    args.key,
+                    args.campaign_seconds,
+                    args.evidence,
+                    {
+                        "calls": args.campaign_calls,
+                        "tokens": args.campaign_tokens,
+                        "actions": args.campaign_actions,
+                        "evaluations": args.campaign_evaluations,
+                    },
+                )
+            }
+    elif args.action == "release-inference":
+        from sovereign_agent import research_allowance as allowance
+
+        if not args.evidence or args.value != "no-inference":
+            raise ValueError("explicit no-inference assertion and evidence required")
+        with db.immediate() as connection:
+            lease = connection.execute("SELECT * FROM research_profile WHERE id=1").fetchone()
+            if lease["inference_owner"] and lease["inference_until"] > time.time():
+                raise PermissionError("cannot release while inference ownership is live")
+            allowance.settle(db, args.key, 0, "operator no-inference evidence: " + args.evidence)
+        result = {"status": "RELEASED", "reservation": args.key}
+    elif args.action == "recover":
+        research.recover(db, root, args.key, args.evidence)
+        result = {"status": "RECORDED", "operation": args.key}
+    elif args.action == "cancel" and args.key:
+        research.cancel_operation(db, root, args.key)
+        result = {"status": "CANCELLATION_REQUESTED", "operation": args.key}
+    elif args.action in {"pause", "resume", "cancel"}:
+        research.control(db, args.id, args.action)
+        result = research.context(db, args.id)
+    elif args.action in {"status", "report"}:
+        result = (
+            research.context(db, args.id)
+            if args.id
+            else [dict(row) for row in db.connection.execute("SELECT * FROM investigations")]
+        )
+        if args.action == "report":
+            result = research.history(db, args.id)
+    elif args.action in {"work", "serve"}:
+        model: Model | None = None
+        if args.live:
+            if args.research_provider == "claude-subscription":
+                from sovereign_agent.research_model import SubscriptionModel
+
+                model = SubscriptionModel(root)
+            else:
+                model = research_http_model(args)
+        stop = threading.Event()
+        if args.action == "serve":
+            for signum in (signal.SIGTERM, signal.SIGINT):
+                signal.signal(signum, lambda *_: stop.set())
+        owner = uuid.uuid4().hex
+        while True:
+            result = {"status": research.wake(db, root, model, owner=owner)}
+            if args.action == "serve":
+                print(json.dumps(result), flush=True)
+            if args.action == "work" or stop.wait(1):
+                break
+    elif args.action != "init":
+        raise ValueError("action is not supported by the research profile")
+    print(json.dumps(result, indent=2, default=str))
+    return 0
+
+
+def research_http_model(args: argparse.Namespace) -> Model:
+    name = os.environ.get("SOVEREIGN_AGENT_LLM_MODEL", "")
+    if not name:
+        raise ValueError("research requires an explicit authorized model configuration")
+    return HTTPModel(
+        os.environ.get("SOVEREIGN_AGENT_LLM_BASE_URL", "http://localhost:11434/v1"),
+        name,
+        os.environ.get("SOVEREIGN_AGENT_LLM_API_KEY", ""),
+        reasoning_effort=None
+        if args.reasoning_effort == "provider-default"
+        else args.reasoning_effort,
+    )
+
+
 def register(subparsers: Any, shared: argparse.ArgumentParser) -> None:
     parser = subparsers.add_parser(
         "agent", parents=[shared], help="build and operate Lucy's always-on teaching agent"
@@ -384,6 +488,12 @@ def register(subparsers: Any, shared: argparse.ArgumentParser) -> None:
         "action",
         choices=[
             "init",
+            "pause",
+            "resume",
+            "redirect",
+            "allow",
+            "release-inference",
+            "recover",
             "ask",
             "work",
             "delegate",
@@ -416,6 +526,15 @@ def register(subparsers: Any, shared: argparse.ArgumentParser) -> None:
         ],
     )
     parser.add_argument("value", nargs="?", default="")
+    parser.add_argument("--profile", choices=["shop", "research"], default="shop")
+    parser.add_argument(
+        "--research-provider", choices=["http", "claude-subscription"], default="http"
+    )
+    parser.add_argument("--campaign-seconds", type=int, default=600)
+    parser.add_argument("--campaign-calls", type=int, default=12)
+    parser.add_argument("--campaign-tokens", type=int, default=12000)
+    parser.add_argument("--campaign-actions", type=int, default=24)
+    parser.add_argument("--campaign-evaluations", type=int, default=12)
     parser.add_argument("--session", default="lucy")
     parser.add_argument(
         "--research-worker",

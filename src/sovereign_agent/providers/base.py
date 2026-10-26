@@ -107,7 +107,7 @@ def allowed_environment(*names: str) -> dict[str, str]:
     return {name: os.environ[name] for name in names if name in os.environ}
 
 
-def capture(executable: str, *args: str) -> ProbeEvidence:
+def capture(executable: str, *args: str, env: dict[str, str] | None = None) -> ProbeEvidence:
     command = (executable, *args)
     located = look_up(executable)
     if located is None:
@@ -120,6 +120,7 @@ def capture(executable: str, *args: str) -> ProbeEvidence:
             text=True,
             timeout=10,
             shell=False,
+            env=env,
         )
     except (OSError, subprocess.TimeoutExpired) as error:
         return ProbeEvidence(command=command, exit_code=None, error=str(error))

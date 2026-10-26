@@ -16,6 +16,13 @@ schedules, approvals bound to the exact spend, idempotent external actions, leas
 recovery, execution isolation, evaluation, controlled improvement and bounded delegation. Python
 3.12 or newer, including Google Colab, SQLite and one runtime dependency, Pydantic.
 
+The optional [research profile](docs/research-profile.md) keeps revisable investigations,
+bounded scientific proposals, asynchronous fixture measurements and evidence history in the
+same agent lifecycle. The shop remains the teaching example; research roles extend it.
+An investigation outlives its execution allowance: later authorized sessions retain
+its evidence and cumulative accounting. The research CLI supports the approved
+Claude Code subscription route as well as explicitly configured HTTP model turns.
+
 **If it helps you understand how agents really work, [star the repository](https://github.com/profrodai/sovereign-agent)**:
 it is how other engineers find it.
 
