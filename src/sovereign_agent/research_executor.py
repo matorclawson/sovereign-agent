@@ -3,6 +3,10 @@
 Files describe the external executor, never agent authority. An exclusive claim
 prevents duplicate evaluation; a dead claimed worker holds UNKNOWN, not a retry.
 This is not an isolation boundary for arbitrary research code.
+
+Run in an installed or editable environment (uv sync / uv run); the worker
+does not inherit PYTHONPATH. Its standard streams are DEVNULL, so inspect
+agent status/report and operation receipts for missing or failed results.
 """
 
 from __future__ import annotations
