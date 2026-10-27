@@ -18,6 +18,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from sovereign_agent.providers.base import allowed_environment
 from sovereign_agent.workspace import safe_join
 
 
@@ -70,6 +71,7 @@ def submit(root: Path, raw: str) -> None:
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             start_new_session=True,
+            env=allowed_environment("PATH", "HOME", "USER", "LOGNAME", "LANG", "LC_ALL", "TMPDIR"),
         )
 
 
